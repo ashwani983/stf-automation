@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # RethinkDB Database (Official Image)
+  rethinkdb:
+    image: rethinkdb:2.4.2
+    container_name: stf-rethinkdb
+    ports:
+      - "28015:28015"  # RethinkDB client driver
+      - "29015:29015"  # RethinkDB cluster
+      - "8080:8080"    # RethinkDB web admin interface
+    volumes:
+      - rethinkdb-data:/data
+    networks:
+      - stf-network
+    restart: unless-stopped
+    command: rethinkdb --bind all --cache-size 2048
+
+  # ADB Server (Official DeviceFarmer Image)
+  adb:
+    image: devicefarmer/adb:latest
+    container_name: stf-adb
+    privileged: true
+    ports:
+      - "5037:5037"    # ADB port
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+    networks:
+      - stf-network
+    restart: unless-stopped
+
+  # STF Application (Official DeviceFarmer Image)
+  stf:
+    image: devicefarmer/stf:latest
+    container_name: stf-app
+    depends_on:
+      - rethinkdb
+      - adb
+    ports:
+      - "7100:7100"    # STF web interface
+      - "7110:7110"    # WebSocket port
+      - "7400-7500:7400-7500"  # Provider ports (matching official)
+    environment:
+      - TZ=${TZ:-UTC}
+      - RETHINKDB_PORT_28015_TCP=tcp://rethinkdb:28015
+      - STF_ADMIN_EMAIL=${STF_ADMIN_EMAIL:-administrator@fakedomain.com}
+      - STF_ADMIN_NAME=${STF_ADMIN_NAME:-Administrator}
+    privileged: true
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb  # USB device access
+      - stf-storage:/data
+    networks:
+      - stf-network
+    restart: unless-stopped
+    command: >
+      stf local
+      --adb-host adb
+      --public-ip ${STF_PUBLIC_IP:-localhost}
+      --provider-min-port 7400
+      --provider-max-port 7500
+
+volumes:
+  rethinkdb-data:
+    driver: local
+  stf-storage:
+    driver: local
+
+networks:
+  stf-network:
+    driver: bridge
