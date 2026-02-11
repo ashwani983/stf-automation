@@ -73,11 +73,11 @@ sudo ./start.sh
 
 -   **Start STF**:
     ```bash
-    ./start.sh
+    sudo ./start.sh
     ```
 -   **Stop STF**:
     ```bash
-    ./stop.sh
+    sudo ./stop.sh
     ```
 
 ### Service Logs
@@ -85,10 +85,10 @@ sudo ./start.sh
 -   **For Docker installations**:
     ```bash
     # View all logs
-    docker compose logs -f
+    sudo docker compose logs -f
 
     # View specific service logs
-    docker compose logs -f stf
+    sudo docker compose logs -f stf
     ```
 -   **For Manual installations**:
     ```bash
