@@ -49,16 +49,21 @@ sudo STF_CORE_IP=10.10.10.3 bash install-provider.sh
 2. runs `restrict-adb.sh` to make `5037` and the device-worker range
    **mesh-only**;
 3. writes `/opt/stf-provider/{compose.yml,.env}`;
-4. pulls the ~3 GB image in the background if it is missing, then starts the
-   provider.
+4. pulls the ~3 GB image if it is missing (and waits for it), then starts the
+   provider with `--force-recreate`;
+5. installs `stf-core-route.service`, which persists the route that makes the
+   core's **direct-cable** address reachable from a host that is only on the
+   mesh (see *Reaching the core's cable address*).
 
-Every step is logged to `/opt/stf-provider/install.log`. If your SSH session
-drops during the image pull, reconnect and poll:
+Every step is logged to `/opt/stf-provider/install.log`:
 
 ```bash
 tail -f /opt/stf-provider/install.log
-docker compose -f /opt/stf-provider/compose.yml up -d   # after the pull finishes
 ```
+
+It is safe to re-run at any time. Re-running always rewrites `.env` and
+recreates the container, so it is the supported way to **move a provider to a
+different core** — see below.
 
 Tunables: `STF_CORE_IP`, `STF_SELF_IP`, `STF_MIN_PORT`, `STF_MAX_PORT`,
 `STF_ADB_PORT`.
@@ -67,10 +72,13 @@ Tunables: `STF_CORE_IP`, `STF_SELF_IP`, `STF_MIN_PORT`, `STF_MAX_PORT`,
 
 | File | Purpose |
 |---|---|
-| `install-provider.sh` | idempotent installer for a phone host |
+| `install-provider.sh` | idempotent installer for a phone host; also re-points an existing provider at a new core |
 | `provider-compose.yml` | the provider unit (host networking) |
 | `stf-adb.service` | adb on `0.0.0.0:5037`, restarted on failure |
 | `restrict-adb.sh` | iptables: loopback + mesh allowed on `5037` and the worker range, everything else dropped |
+| `stf-core-route.service`* | installed by the script: persists the route to the core's `10.10.10.0/24` cable subnet |
+
+\* generated at install time into `/etc/systemd/system/`, not kept in this repo.
 
 ## Port range
 
@@ -122,3 +130,58 @@ docker logs stf-core | grep "is present"          # no 'Reaping' lines
 accepted it. A `Device ... is present` followed by `Reaping device ... due to
 heartbeat timeout` means the provider's `--connect-push` path to the core is
 broken (usually the provider is crash-looping — check the log above it).
+
+## Moving a provider to a different core
+
+A provider that was installed against an older core keeps running happily
+against that dead core: adb still works, the provider still binds its stream
+port, and it looks *fine* from the phone host. The only symptom is that the
+devices never appear in the current panel.
+
+This is exactly what happened on host 0.3, whose `/opt/stf-provider/.env` still
+said `CORE_IP=10.8.0.4` (the old Windows core) after the core moved to Proxmox.
+
+To check and fix:
+
+```bash
+# 1. what core is this provider actually talking to?
+docker inspect stf-provider-peer --format '{{range .Config.Cmd}}{{println .}}{{end}}' \
+  | grep -E 'connect-sub|storage-url'
+
+# 2. re-point it (rewrites .env and recreates the container)
+sudo STF_CORE_IP=10.8.0.5 STF_SELF_IP=10.8.0.3 bash install-provider.sh
+```
+
+Confirm with an established connection to the core, then check the panel:
+
+```bash
+sudo ss -tnp | grep -E '10\.8\.0\.5:(7114|7116|7100)'
+```
+
+## Reaching the core's cable address
+
+The core's container lives on the direct cable between Proxmox and host 0.6
+(`10.10.10.0/24`, core at `10.10.10.3`). That subnet is **not routed by the
+mesh hub**: every peer uses `AllowedIPs = 0.0.0.0/0` toward the hub, so a
+packet to `10.10.10.3` is handed to the hub, which has no route for it, and is
+dropped.
+
+Two consequences:
+
+* **Use `STF_CORE_IP=10.8.0.5`** (Proxmox's mesh address) for any host that is
+  not on the cable. Proxmox DNATs the core's ports to the container, so this
+  always works.
+* A host that *is* on the cable (0.6) can use `10.10.10.3` for a sub-millisecond
+  path.
+
+`install-provider.sh` also drops a persistent host route
+(`10.10.10.0/24 via <core>`) via `stf-core-route.service`, so the cable address
+works directly from a mesh-only host too. It is belt-and-braces, not required.
+
+One trap when testing: probing `10.8.0.5` **from the Proxmox host itself** gives
+a false negative — traffic to its own address goes via loopback and never enters
+the DNAT chain. Test from a real peer, or read the counters:
+
+```bash
+iptables -t nat -L PREROUTING -v -n | grep DNAT
+```

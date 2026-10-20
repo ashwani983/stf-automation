@@ -65,19 +65,56 @@ GROUP_TIMEOUT=900
 TZ=Asia/Kolkata
 EOF
 
-# --- 3. image (3 GB - run it in the background and poll) ------------------
+# --- 3. image --------------------------------------------------------------
 cd "$DEST" || exit 1
 if ! docker image inspect devicefarmer/stf:latest >/dev/null 2>&1; then
-  log "pulling devicefarmer/stf (~3 GB) - this is the slow part"
-  nohup docker compose -f compose.yml pull > "$DEST/pull.log" 2>&1 &
-  log "pull running in background, log: $DEST/pull.log"
-  log "follow with: tail -f $DEST/pull.log"
-  exit 0
+  log "pulling devicefarmer/stf (~3 GB) - this is the slow part, waiting for it"
+  docker compose -f compose.yml pull 2>&1 | tail -3 | sed 's/^/  /' || {
+    log "FATAL: image pull failed - re-run this script once the network is back"
+    exit 1
+  }
 fi
 
 # --- 4. start --------------------------------------------------------------
-log "image already present, starting provider"
-docker compose -f compose.yml up -d
+# --force-recreate matters: on a re-run the container must pick up the .env
+# written above. Without it, `up -d` sees no change and keeps running against
+# whatever core it was started with - which is how a provider silently stays
+# bound to a decommissioned core.
+log "starting provider (core=$CORE_IP)"
+docker compose -f compose.yml up -d --force-recreate
+
+# --- 5. route to the core's direct-cable subnet ---------------------------
+# The core's cable address (10.10.10.3) is only natively reachable from the
+# two hosts on that cable. Every other mesh peer sends 10.10.10.0/24 to the
+# hub, which has no route for it, so the packet dies. This host route sends it
+# to Proxmox instead, which forwards and NATs it. Harmless when the core is
+# reached over the mesh (10.8.0.5): it only affects the cable subnet.
+WG_IFACE="$(ip -o link show 2>/dev/null | awk -F': ' '$2 ~ /^(wg|home_|kuuashwa)/ {print $2; exit}')"
+if [ -n "$WG_IFACE" ]; then
+  cat > /etc/systemd/system/stf-core-route.service <<EOF
+[Unit]
+Description=Route to the STF core's direct-cable subnet via the Proxmox mesh peer
+Documentation=https://github.com/ashwani983/stf-automation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/ip route replace 10.10.10.0/24 via $CORE_IP dev $WG_IFACE
+ExecStop=/sbin/ip route del 10.10.10.0/24 dev $WG_IFACE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now stf-core-route.service >/dev/null 2>&1 || true
+  log "cable route via $CORE_IP on $WG_IFACE: $(systemctl is-active stf-core-route)/$(systemctl is-enabled stf-core-route)"
+else
+  log "no wireguard interface found - skipping the cable route"
+fi
+
+# --- 6. verify ------------------------------------------------------------
 sleep 12
 docker ps --filter name=stf-provider-peer --format '  {{.Names}}  {{.Status}}'
 log "done - devices should appear in the panel in a few seconds"
