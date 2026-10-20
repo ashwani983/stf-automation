@@ -1,0 +1,11 @@
+# Shell scripts and systemd units are copied to Linux hosts (scp) and executed
+# there. A CRLF would break the shebang / unit parsing, so force LF in the repo.
+*.sh        text eol=lf
+*.service   text eol=lf
+
+# Windows scripts stay CRLF-native.
+*.ps1       text eol=crlf
+
+# Compose files are read by both platforms; LF is safe everywhere.
+*.yml       text eol=lf
+*.yaml      text eol=lf

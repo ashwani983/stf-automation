@@ -1,0 +1,23 @@
+[Unit]
+Description=adb server for STF over WireGuard (mesh only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# -a binds every interface, including WireGuard, so the STF core on another
+# mesh host can reach this phone. Without -a adb binds 127.0.0.1 only.
+# Any stray `adb` client run on this box auto-starts a server on
+# 127.0.0.1:5037, which makes our 0.0.0.0:5037 bind abort with "Address
+# already in use". If that server has wedged, `adb kill-server` HANGS trying
+# to talk to it, so hard-kill by signal instead. ("-" = ignore "no match".)
+ExecStartPre=-/usr/bin/pkill -9 adb
+ExecStartPre=/bin/sleep 1
+# restrict-adb.sh drops every non-mesh source on that port first.
+ExecStartPre=/usr/local/bin/stf-restrict-adb.sh
+ExecStart=/usr/bin/adb -a -P 5037 nodaemon server start
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

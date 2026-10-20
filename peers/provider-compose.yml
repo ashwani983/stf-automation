@@ -1,0 +1,50 @@
+﻿# STF provider that runs NEXT TO the phones (native multi-provider topology).
+#
+# Why this and not a remote --adb-host:
+#   STF's screen capture (minicap) is piped through adb. If the provider is on
+#   another machine, every video frame crosses the network on that one adb
+#   socket - the case STF upstream calls "almost unbelievable slowness".
+#   Here adb is 127.0.0.1, so only device metadata and control touch the mesh,
+#   and the browser fetches the stream straight from this host.
+#
+# host networking is deliberate: the provider binds --min-port..--max-port
+# itself, so with bridge mode Docker would have to publish a 300-port range and
+# bypass the host firewall via DOCKER-USER. On the host, restrict-adb.sh can
+# simply drop non-mesh traffic in INPUT.
+
+services:
+  stf-provider:
+    image: devicefarmer/stf:latest
+    container_name: stf-provider-peer
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TZ: ${TZ:-Asia/Kolkata}
+      # The healthcheck below probes the first device-worker port. It cannot ask
+      # stf which port it chose (no CLI in the image), so it uses the low bound.
+      MIN_PORT: ${MIN_PORT:-7600}
+    command:
+      - stf
+      - provider
+      - --name=peer-${SELF_IP}
+      - --connect-sub=tcp://${CORE_IP}:7114
+      - --connect-push=tcp://${CORE_IP}:7116
+      - --storage-url=http://${CORE_IP}:7100/
+      # THIS host's mesh address: the browser pulls the stream from here.
+      - --public-ip=${SELF_IP}
+      - --min-port=${MIN_PORT:-7600}
+      - --max-port=${MAX_PORT:-7700}
+      # The adb server on this machine (stf-adb.service), reached over loopback.
+      - --adb-host=127.0.0.1
+      - --adb-port=${ADB_PORT:-5037}
+      - --group-timeout=${GROUP_TIMEOUT:-900}
+    healthcheck:
+      # There is no adb CLI inside this image (STF uses adbkit), so probe the
+      # thing that actually matters: the stream port the provider opened. If
+      # the device worker dies, the port stops accepting and Docker flags it.
+      test: ["CMD-SHELL", "node -e \"const net=require('net');const p=process.env.MIN_PORT||7600;const s=net.connect(p,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),5000)\""]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 90s
+

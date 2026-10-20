@@ -1,0 +1,13 @@
+# Secrets. Never commit.
+#  - root .env: PUBLIC_IP etc. for the legacy single-host compose
+#  - windows/.env: STF_AUTH_SECRET + admin credentials
+.env
+*.env
+!.env.example
+
+# Runtime artifacts
+*.log
+pull.log
+install.log
+peer-ports.json
+state/

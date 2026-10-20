@@ -1,241 +1,84 @@
-# STF Automation - Project Structure
+# Project Structure
 
-## 📁 Directory Structure
+## Directory layout
 
 ```
 stf-automation/
-├── README.md                  # Complete documentation with installation & usage guides
-├── PROJECT_STRUCTURE.md       # This file - project overview
-├── .env                       # Environment variables for Docker setup
-├── docker-compose.yml         # Docker Compose configuration for STF stack
+├── README.md                  # overview: the mesh topology and why
+├── PROJECT_STRUCTURE.md       # this file
+├── .gitignore                 # ignores .env
 │
-├── install.sh                 # Unified installation script (Docker or Manual)
-├── start.sh                   # Unified script to start STF (Docker or Manual)
-└── stop.sh                    # Unified script to stop STF (Docker or Manual)
+├── windows/                   # THE CORE: Windows PC (10.8.0.4), Docker Desktop
+│   ├── README.md
+│   ├── docker-compose.yml     # rethinkdb + stf-core + local provider
+│   ├── .env                   # STF_IP, ports, admin, STF_AUTH_SECRET (gitignored)
+│   ├── start.ps1 / stop.ps1   # bring the stack up / down
+│   ├── firewall.ps1           # open panel/stream ports on the WireGuard iface
+│   └── adb-service.ps1        # persist adb on 0.0.0.0 across reboots
+│
+├── peers/                     # PHONE HOSTS: one provider per machine with phones
+│   ├── README.md
+│   ├── install-provider.sh    # install adb service + start the provider
+│   ├── provider-compose.yml   # `stf provider` with host networking
+│   ├── stf-adb.service        # adb on 0.0.0.0:5037
+│   └── restrict-adb.sh        # iptables: loopback + mesh only
+│
+└── (legacy, single host)
+    ├── docker-compose.yml     # `stf local --adb-host adb` + adb container
+    ├── install.sh             # Docker-or-manual installer
+    ├── start.sh / stop.sh
+    └── .env
 ```
 
-## 📄 File Descriptions
+## How the pieces talk
 
-### Documentation
-- **README.md**: Comprehensive guide covering both installation methods, usage, configuration, and troubleshooting
-- **PROJECT_STRUCTURE.md**: This file - provides project overview and quick reference
+| From | To | Protocol | Purpose |
+|---|---|---|---|
+| browser (any mesh member) | core `:7100` | HTTP | the panel |
+| browser | provider host `:74xx`/`:76xx` | websocket | device video + touch |
+| phone host provider | core `:7114` | ZMQ SUB | commands in |
+| phone host provider | core `:7116` | ZMQ PUSH | device metadata / heartbeats |
+| phone host provider | core `:7100` | HTTP | uploads, logs |
+| core provider | Windows adb `host.docker.internal:5037` | adb | USB phone on the core host |
+| phone host provider | local adb `127.0.0.1:5037` | adb | USB phones on that host |
 
-### Configuration Files
-- **.env**: Docker environment variables (PUBLIC_IP, ports, etc.)
-- **docker-compose.yml**: Defines STF, RethinkDB, and ADB services for Docker
+The only client of a phone host's `5037` is its own provider — everything else
+is blocked by `restrict-adb.sh`. Nothing on the mesh connects to `5037`.
 
-### Installation & Operation Scripts
-| Script | Purpose | Usage |
-|--------|---------|-------|
-| `install.sh` | Install STF using Docker or manually | `./install.sh` |
-| `start.sh`   | Start all STF services       | `./start.sh` |
-| `stop.sh`    | Stop all STF services        | `./stop.sh` |
+## Ports
 
+| Port | Host | Notes |
+|---|---|---|
+| `7100` | core | panel |
+| `7110` | core | app websocket |
+| `7114`, `7116` | core | provider ZMQ; must be reachable by every phone host |
+| `7400-7500` | core | core host's own device video |
+| `7600-7700` | phone host | that host's device video |
+| `18080` | core | RethinkDB admin, bound to `127.0.0.1` |
 
-## 🚀 Quick Start Guide
+`7600-7700` avoids `7680` (Windows Delivery Optimization) and does not overlap
+the core's `7400-7500`.
+
+## Health checks
 
 ```bash
-# 1. Run the installer and choose your preferred method (Docker or Manual)
-./install.sh
+# core host
+docker ps --format '{{.Names}}  {{.Status}}'
+docker logs --tail 50 stf-core | grep -E 'is present|Reaping'
 
-# 2. (Optional, for Docker) Edit .env to set your PUBLIC_IP
-nano .env
-
-# 3. Start services
-./start.sh
-
-# 4. Access STF at http://localhost:7100
+# phone host
+sudo docker inspect stf-provider-peer --format '{{.State.Status}} {{.State.Health.Status}}'
+sudo docker logs --tail 50 stf-provider-peer | grep -E 'Fully operational|Providing all'
+sudo systemctl status stf-adb
 ```
 
-## 🎯 Key Features
+Success looks like `Providing all N device(s)` on the provider and a stream of
+`Device "..." is present` lines with no `Reaping` on the core.
 
-### Docker Installation
-- ✅ **Isolated environment** - No system-wide dependencies
-- ✅ **Easy cleanup** - Remove everything with `docker compose down -v`
-- ✅ **Reproducible** - Same environment everywhere
-- ✅ **Quick setup** - One command installation
-- ✅ **Multiple instances** - Can run different versions
+## Adding a phone host
 
-### Manual Installation
-- ✅ **Better performance** - Direct hardware access
-- ✅ **Systemd integration** - Auto-start on boot
-- ✅ **More control** - Full customization
-- ✅ **Production ready** - Service management
-- ✅ **Lower overhead** - No containerization layer
-
-## 🔍 What Each Component Does
-
-### STF Components
-- **STF App**: Main web application for device management
-- **RethinkDB**: Database for storing device info, users, and sessions
-- **ADB Server**: Communicates with Android devices via USB
-
-### Installation Process
-
-The `install.sh` script will guide you through either the Docker or Manual installation process.
-
-#### Docker Installation
-1. Installs Docker & Docker Compose
-2. Installs ADB on host
-3. Sets up USB permissions
-4. Pulls Docker images:
-   - `rethinkdb:2.4`
-   - `devicefarmer/stf:latest`
-   - `devicefarmer/adb:latest`
-
-#### Manual Installation
-1. Installs system dependencies:
-   - cmake, graphicsmagick
-   - libzmq, protobuf
-   - yasm, pkg-config
-   - ADB, bzip2
-2. Installs Node.js 20.x
-3. Installs RethinkDB
-4. Clones STF repository
-5. Installs NPM dependencies
-6. Creates systemd services
-7. Configures USB permissions
-
-## 🛠️ Customization
-
-### Docker Configuration
-
-**Edit `.env` file:**
-```bash
-STF_PUBLIC_IP=192.168.1.100  # Your machine's IP
-```
-
-**Edit `docker-compose.yml`:**
-- Change port mappings
-- Adjust resource limits
-
-### Manual Configuration
-
-**Edit systemd services:**
-```bash
-sudo nano /etc/systemd/system/stf.service
-sudo systemctl daemon-reload
-sudo systemctl restart stf
-```
-
-**Common STF options:**
-```bash
-stf local --public-ip 192.168.1.100 \
-          --port 7100 \
-          --allow-remote
-```
-
-## 📊 Service Architecture
-
-### Docker Stack
-```
-┌─────────────────────────────────────────┐
-│           Docker Host                   │
-│  ┌────────────┐  ┌─────────────┐       │
-│  │ STF App    │  │ RethinkDB   │       │
-│  │ Port: 7100 │  │ Port: 28015 │       │
-│  └────────────┘  └─────────────┘       │
-│  ┌────────────┐                         │
-│  │ ADB Server │                         │
-│  │ Port: 5037 │                         │
-│  └────────────┘                         │
-│  USB Devices: /dev/bus/usb              │
-└─────────────────────────────────────────┘
-```
-
-### Manual Installation
-```
-┌─────────────────────────────────────────┐
-│         Host System (Ubuntu)            │
-│  ┌────────────────────────────────┐     │
-│  │    Systemd Services            │     │
-│  │  ┌──────────────────────────┐  │     │
-│  │  │ stf-rethinkdb.service    │  │     │
-│  │  └──────────────────────────┘  │     │
-│  │  ┌──────────────────────────┐  │     │
-│  │  │ stf.service              │  │     │
-│  │  └──────────────────────────┘  │     │
-│  └────────────────────────────────┘     │
-│  USB Devices: /dev/bus/usb              │
-└─────────────────────────────────────────┘
-```
-
-## 🔗 Access Points
-
-After successful installation:
-
-| Service | URL | Purpose |
-|---------|-----|---------|
-| STF Web Interface | http://localhost:7100 | Main application |
-| RethinkDB Admin | http://localhost:8080 | Database management |
-| ADB Server | localhost:5037 | Device communication |
-
-**Default Credentials:**
-- Email: `administrator@fakedomain.com`
-
-## 🧪 Testing the Setup
-
-```bash
-# Check if services are running (Docker)
-docker compose ps
-
-# Check if services are running (Manual)
-sudo systemctl status stf
-sudo systemctl status stf-rethinkdb
-
-# Check connected devices
-adb devices
-
-# View logs (Docker)
-docker compose logs -f stf
-
-# View logs (Manual)
-sudo journalctl -u stf -f
-```
-
-## 🔄 Maintenance
-
-### Docker
-```bash
-# Update images
-docker pull devicefarmer/stf:latest
-docker compose up -d
-
-# Backup data (if using volumes)
-# You need to define a backup strategy for your named volumes.
-
-# Clean everything
-docker compose down -v
-```
-
-### Manual
-```bash
-# Update STF
-cd ~/Desktop/Workspace/stf
-git pull
-npm install
-sudo systemctl restart stf
-
-# Backup RethinkDB
-rethinkdb dump -f backup.tar.gz
-```
-
-## 📞 Support
-
-- **Documentation**: See README.md
-- **STF Issues**: https://github.com/DeviceFarmer/stf/issues
-- **STF Docs**: https://github.com/DeviceFarmer/stf/blob/master/README.md
-
-## 🎓 Learning Resources
-
-1. Start with the `install.sh` script.
-2. Read README.md for detailed guides.
-3. Experiment with connecting devices.
-4. Check STF API documentation for automation.
-5. Explore deployment options for production.
-
----
-
-**Version**: 2.0
-**Last Updated**: 2026-02-11
-**Author**: Automated Setup Scripts for STF
+1. Get it onto the mesh (WireGuard: it can reach the core's `10.8.0.4`).
+2. Copy `peers/` to it and run `sudo STF_CORE_IP=10.8.0.4 bash install-provider.sh`.
+3. Pick a free `7600-7700`-style range if another provider already uses it
+   **on that same host**. Different hosts may share a range.
+4. Device appears in the panel within seconds.

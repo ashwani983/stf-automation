@@ -1,0 +1,102 @@
+# STF on this Windows PC (Docker Desktop) -- the CORE of the farm.
+#
+# The phone is USB-plugged into THIS machine, so there is no remote adb server
+# involved: the local provider talks to the Windows adb server that is already
+# listening on all interfaces.
+#
+#   Windows adb (0.0.0.0:5037)  <-- host.docker.internal --  stf-provider-win
+#                                                                  |
+#                                                            stf-core + rethinkdb
+#
+# Phones plugged into OTHER machines are handled by `stf provider` running on
+# those machines (see ../peers/), which connect back to stf-core's ZMQ buses
+# (7114/7116) and are left alone by this file.
+#
+# Reach the panel over WireGuard at http://${STF_IP}:7100 (10.8.0.4 = gamepc).
+# `--public-ip` is set to the WireGuard address so the per-device streaming
+# URLs (ws://10.8.0.4:74xx) work both from this PC and from any mesh peer.
+
+services:
+  rethinkdb:
+    image: rethinkdb:2.4.2
+    container_name: stf-rethinkdb
+    command: rethinkdb --bind all --cache-size 2048
+    volumes:
+      - rethinkdb-data:/data
+    networks: [stf-net]
+    restart: unless-stopped
+    ports:
+      # Admin UI, localhost only (8080 is often taken on Windows).
+      - "127.0.0.1:18080:8080"
+
+  stf-core:
+    image: devicefarmer/stf:latest
+    container_name: stf-core
+    depends_on: [rethinkdb]
+    environment:
+      - TZ=${TZ:-Asia/Kolkata}
+      - RETHINKDB_PORT_28015_TCP=tcp://rethinkdb:28015
+      # Read by the `migrate` step to create/update the root admin account.
+      # Must be a valid email (needs a TLD) or the mock login validator rejects it.
+      - STF_ADMIN_EMAIL=${STF_ADMIN_EMAIL:-admin@example.com}
+      - STF_ADMIN_NAME=${STF_ADMIN_NAME:-Admin}
+    command:
+      - stf
+      - local
+      - --no-provider
+      - --public-ip=${STF_IP}
+      # Bind the internal ZMQ buses to 0.0.0.0 so the provider container joins.
+      - --bind-app-pub=tcp://0.0.0.0:7111
+      - --bind-app-dealer=tcp://0.0.0.0:7112
+      - --bind-app-pull=tcp://0.0.0.0:7113
+      - --bind-dev-pub=tcp://0.0.0.0:7114
+      - --bind-dev-dealer=tcp://0.0.0.0:7115
+      - --bind-dev-pull=tcp://0.0.0.0:7116
+      - --group-timeout=${GROUP_TIMEOUT:-900}
+      - --auth-secret=${STF_AUTH_SECRET:?set STF_AUTH_SECRET in .env}
+    ports:
+      # Web UI (poorxy) and the websocket unit.
+      - "${STF_WEB_PORT:-7100}:7100"
+      - "${STF_WS_PORT:-7110}:7110"
+      # Provider ZMQ buses. Published so a provider running on ANOTHER mesh
+      # host (a phone plugged into e.g. 10.8.0.6) can join this core:
+      #   7114 = dev pub  (core -> provider commands)
+      #   7116 = dev pull (provider -> core events)
+      # 7115 (dev dealer) is core-internal and is not needed by providers.
+      - "0.0.0.0:${STF_DEV_PUB_PORT:-7114}:7114"
+      - "0.0.0.0:${STF_DEV_PULL_PORT:-7116}:7116"
+    networks: [stf-net]
+    restart: unless-stopped
+
+  stf-provider:
+    image: devicefarmer/stf:latest
+    container_name: stf-provider-win
+    depends_on: [stf-core]
+    environment:
+      - TZ=${TZ:-Asia/Kolkata}
+    command:
+      - stf
+      - provider
+      - --name=windows-pc
+      - --connect-sub=tcp://stf-core:7114
+      - --connect-push=tcp://stf-core:7116
+      - --storage-url=http://stf-core:7100/
+      - --public-ip=${STF_IP}
+      - --min-port=${PROVIDER_MIN_PORT:-7400}
+      - --max-port=${PROVIDER_MAX_PORT:-7500}
+      - --adb-host=${ADB_HOST:-host.docker.internal}
+      - --adb-port=${ADB_PORT:-5037}
+      - --group-timeout=${GROUP_TIMEOUT:-900}
+    ports:
+      # Device streaming ports must be reachable by the browser.
+      - "${PROVIDER_MIN_PORT:-7400}-${PROVIDER_MAX_PORT:-7500}:${PROVIDER_MIN_PORT:-7400}-${PROVIDER_MAX_PORT:-7500}"
+    networks: [stf-net]
+    restart: unless-stopped
+
+networks:
+  stf-net:
+    driver: bridge
+    name: stf-net
+
+volumes:
+  rethinkdb-data:
