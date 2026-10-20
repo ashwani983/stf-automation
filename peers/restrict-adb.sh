@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # Restrict adb (and the STF provider's stream ports) to the WireGuard mesh.
 #
 # adb on 0.0.0.0 gives any caller full control of every plugged-in phone, and a

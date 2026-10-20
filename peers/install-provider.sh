@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # Install the STF *provider* on the machine the phones are plugged into.
 #
 #   sudo bash install-provider.sh                 # core at 10.8.0.5, detected self IP

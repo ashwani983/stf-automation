@@ -1,4 +1,4 @@
-﻿# STF provider that runs NEXT TO the phones (native multi-provider topology).
+# STF provider that runs NEXT TO the phones (native multi-provider topology).
 #
 # Why this and not a remote --adb-host:
 #   STF's screen capture (minicap) is piped through adb. If the provider is on
