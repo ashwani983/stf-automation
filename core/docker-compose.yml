@@ -1,0 +1,84 @@
+# STF CORE on the Proxmox host (LXC container `stf-core`, CTID 110).
+#
+# This is the brain of the farm. It runs NO provider of its own (no phone is
+# plugged into the Proxmox box): every phone host runs its own `stf provider`
+# and connects back here over the network. See ../peers/ and ../windows/.
+#
+# Topology
+# --------
+#   providers (0.3 / 0.6 / Windows)  --ZMQ 7114+7116-->  stf-core  -->  rethinkdb
+#   browser  --HTTP 7100-->  poorxy (stf-core)
+#   browser  --ws://<provider-ip>:74xx-->  the provider holding the device
+#
+# Networking (why these addresses)
+# --------------------------------
+# `stf-core` sits on the DIRECT CABLE between Proxmox and host 0.6, which is
+# enlarged to a /24 (10.10.10.0/24): Proxmox .1, 0.6 .2, this container .3.
+# That link is sub-millisecond, so 0.6's provider gets a fast core connection.
+# Hosts 0.3 and the Windows PC reach this core over the WireGuard mesh
+# (10.8.0.0/24) instead; Proxmox forwards and NATs for 10.10.10.0/24.
+#
+# `--public-ip` is the address the BROWSER uses for the per-device streaming
+# websockets *served by the providers*, not by the core, so it is only used for
+# building URLs on the core's own pages. Set it to the address most clients use.
+#
+# Reach the panel at http://10.10.10.3:7100 (from the cable side / 0.6)
+#                   or   http://10.0.0.5:7100  (from the mesh, via proxmox)
+services:
+  rethinkdb:
+    image: rethinkdb:2.4.2
+    container_name: stf-rethinkdb
+    command: rethinkdb --bind all --cache-size 2048
+    volumes:
+      - rethinkdb-data:/data
+    networks: [stf-net]
+    restart: unless-stopped
+    ports:
+      # Admin UI on localhost only.
+      - "127.0.0.1:18080:8080"
+
+  stf-core:
+    image: devicefarmer/stf:latest
+    container_name: stf-core
+    depends_on: [rethinkdb]
+    environment:
+      - TZ=${TZ:-Asia/Kolkata}
+      - RETHINKDB_PORT_28015_TCP=tcp://rethinkdb:28015
+      # Read by the `migrate` step to create/update the root admin account.
+      # Must be a valid email (needs a TLD) or the mock login validator rejects it.
+      - STF_ADMIN_EMAIL=${STF_ADMIN_EMAIL:-admin@example.com}
+      - STF_ADMIN_NAME=${STF_ADMIN_NAME:-Admin}
+    command:
+      - stf
+      - local
+      - --no-provider
+      - --public-ip=${STF_IP}
+      # Bind the internal ZMQ buses to 0.0.0.0 so remote providers can join.
+      - --bind-app-pub=tcp://0.0.0.0:7111
+      - --bind-app-dealer=tcp://0.0.0.0:7112
+      - --bind-app-pull=tcp://0.0.0.0:7113
+      - --bind-dev-pub=tcp://0.0.0.0:7114
+      - --bind-dev-dealer=tcp://0.0.0.0:7115
+      - --bind-dev-pull=tcp://0.0.0.0:7116
+      - --group-timeout=${GROUP_TIMEOUT:-900}
+      - --auth-secret=${STF_AUTH_SECRET:?set STF_AUTH_SECRET in .env}
+    ports:
+      # Web UI (poorxy) and the websocket unit.
+      - "0.0.0.0:${STF_WEB_PORT:-7100}:7100"
+      - "0.0.0.0:${STF_WS_PORT:-7110}:7110"
+      # Provider ZMQ buses, published so providers on other hosts can join:
+      #   7114 = dev pub  (core -> provider commands)
+      #   7116 = dev pull (provider -> core events)
+      # 7115 (dev dealer) is core-internal and is not needed by providers.
+      - "0.0.0.0:${STF_DEV_PUB_PORT:-7114}:7114"
+      - "0.0.0.0:${STF_DEV_PULL_PORT:-7116}:7116"
+    networks: [stf-net]
+    restart: unless-stopped
+
+networks:
+  stf-net:
+    driver: bridge
+    name: stf-net
+
+volumes:
+  rethinkdb-data:
