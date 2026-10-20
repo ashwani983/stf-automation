@@ -1,0 +1,45 @@
+# STF provider-only stack for the Windows PC.
+#
+# The core no longer lives here: it runs on Proxmox (see ../core/). This machine
+# only contributes the phone(s) plugged into it.
+#
+#   Windows adb (0.0.0.0:5037)  <-- host.docker.internal --  stf-provider-win
+#                                                                  |
+#                                          ZMQ 7114/7116 --> core @10.8.0.5
+#
+# The core is reached over the WireGuard mesh at Proxmox's mesh address
+# (`CORE_IP`, 10.8.0.5); Proxmox forwards those ports on to the core container
+# on the direct cable. The browser pulls device streams straight from THIS host
+# at `SELF_IP`:74xx, so only metadata and control cross the mesh.
+
+services:
+  stf-provider:
+    image: devicefarmer/stf:latest
+    container_name: stf-provider-win
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Kolkata}
+      MIN_PORT: ${PROVIDER_MIN_PORT:-7400}
+    command:
+      - stf
+      - provider
+      - --name=windows-pc
+      - --connect-sub=tcp://${CORE_IP}:7114
+      - --connect-push=tcp://${CORE_IP}:7116
+      - --storage-url=http://${CORE_IP}:7100/
+      # THIS host's mesh address: the browser pulls the stream from here.
+      - --public-ip=${SELF_IP}
+      - --min-port=${PROVIDER_MIN_PORT:-7400}
+      - --max-port=${PROVIDER_MAX_PORT:-7500}
+      - --adb-host=${ADB_HOST:-host.docker.internal}
+      - --adb-port=${ADB_PORT:-5037}
+      - --group-timeout=${GROUP_TIMEOUT:-900}
+    ports:
+      # Device streaming ports must be reachable by the browser.
+      - "${PROVIDER_MIN_PORT:-7400}-${PROVIDER_MAX_PORT:-7500}:${PROVIDER_MIN_PORT:-7400}-${PROVIDER_MAX_PORT:-7500}"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const net=require('net');const p=process.env.MIN_PORT||7400;const s=net.connect(p,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),5000)\""]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 120s

@@ -1,7 +1,10 @@
-# Start the STF stack on this Windows PC.
+# Start the STF provider on this Windows PC.
 #
 #   1. makes sure the Windows adb server is listening on all interfaces
-#   2. brings up RethinkDB + STF core + the provider via Docker Compose
+#   2. brings up stf provider, pointed at the core on Proxmox (CORE_IP)
+#
+# The core itself runs on Proxmox now -- see ../core/. This host contributes
+# only the phone(s) plugged into it.
 #
 # Run from this directory:  powershell -ExecutionPolicy Bypass -File .\start.ps1
 
@@ -24,17 +27,16 @@ if (Test-Path $adb) {
     }
     & $adb devices -l
 } else {
-    Write-Warning "adb not found at $adb -- set ADB_HOST in .env to reach adb somewhere else"
+    Write-Warning "adb not found at $adb -- set ADB_HOST in .env.provider to reach adb somewhere else"
 }
 
-Write-Host '==> docker compose up -d'
-docker compose up -d
+Write-Host '==> docker compose up -d (provider only, core is on Proxmox)'
+docker compose -f provider-compose.yml --env-file .env.provider up -d
 
 Write-Host '==> status'
-docker compose ps
+docker compose -f provider-compose.yml --env-file .env.provider ps
 
-$ip = (Select-String -Path .env -Pattern '^STF_IP=(.+)$').Matches.Groups[1].Value
-$web = (Select-String -Path .env -Pattern '^STF_WEB_PORT=(.+)$').Matches.Groups[1].Value
-if (-not $web) { $web = '7100' }
+$core = (Select-String -Path .env.provider -Pattern '^CORE_IP=(.+)$').Matches.Groups[1].Value
 Write-Host ""
-Write-Host "STF web UI:  http://${ip}:${web}   (also http://localhost:${web} on this PC)"
+Write-Host "Panel (core on Proxmox):  http://${core}:7100"
+Write-Host "Watch this provider:      docker logs -f stf-provider-win"

@@ -1,3 +1,3 @@
-# Stop the STF stack (containers only; the RethinkDB volume is kept).
+# Stop the STF provider on this Windows PC (containers only; no state is kept).
 Set-Location -Path $PSScriptRoot
-docker compose down
+docker compose -f provider-compose.yml --env-file .env.provider down

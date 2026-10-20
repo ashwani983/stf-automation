@@ -1,8 +1,13 @@
 ﻿#!/bin/bash
 # Install the STF *provider* on the machine the phones are plugged into.
 #
-#   sudo bash install-provider.sh                 # core at 10.8.0.4, detected self IP
-#   sudo STF_CORE_IP=10.8.0.4 STF_SELF_IP=10.8.0.3 bash install-provider.sh
+#   sudo bash install-provider.sh                 # core at 10.8.0.5, detected self IP
+#   sudo STF_CORE_IP=10.8.0.5 STF_SELF_IP=10.8.0.3 bash install-provider.sh
+#
+# The core runs on the Proxmox box (see ../core/). Over the mesh it is reached
+# at Proxmox's mesh address, 10.8.0.5, which DNATs the core's ports to the
+# container on its direct cable. A host ON that cable (10.10.10.0/24) can use
+# STF_CORE_IP=10.10.10.3 instead for a sub-millisecond path.
 #
 # Everything is time-bounded and logs to /opt/stf-provider/install.log, so an
 # SSH drop can never leave the machine in a half-configured mystery state:
@@ -11,7 +16,7 @@ set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DEST=/opt/stf-provider
-CORE_IP="${STF_CORE_IP:-10.8.0.4}"
+CORE_IP="${STF_CORE_IP:-10.8.0.5}"
 MIN_PORT="${STF_MIN_PORT:-7600}"
 MAX_PORT="${STF_MAX_PORT:-7700}"
 ADB_PORT="${STF_ADB_PORT:-5037}"
@@ -27,7 +32,7 @@ command -v adb >/dev/null 2>&1 || { log "FATAL: adb is not installed (apt-get in
 SELF_IP="${STF_SELF_IP:-}"
 if [ -z "$SELF_IP" ]; then
   SELF_IP="$(ip -4 -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 |
-             grep -E '^10\.8\.0\.' | grep -v '^10\.8\.0\.4$' | head -1)"
+             grep -E '^10\.8\.0\.' | grep -v '^10\.8\.0\.5$' | head -1)"
 fi
 [ -n "$SELF_IP" ] || { log "FATAL: could not detect this host's mesh IP; pass STF_SELF_IP=..."; exit 1; }
 log "core=$CORE_IP self=$SELF_IP adb=$ADB_PORT ports=$MIN_PORT-$MAX_PORT"

@@ -2,7 +2,7 @@
 
 Run this on **any machine that has phones USB-plugged into it**, to publish
 those phones into an existing STF core. This is STF's native "multi-provider"
-layout: the core stays where it is (see [`../windows/`](../windows/)); every
+layout: the core runs on the Proxmox box (see [`../core/`](../core/)); every
 machine with devices runs a provider of its own.
 
 ```
@@ -34,8 +34,11 @@ video directly from this host.
 ## Install
 
 ```bash
-# on the phone host, as root; adjusts ports if needed
-sudo STF_CORE_IP=10.8.0.4 bash install-provider.sh
+# on the phone host, as root; core reached at proxmox's mesh address
+sudo STF_CORE_IP=10.8.0.5 bash install-provider.sh
+
+# a host on the direct cable (10.10.10.0/24) can use the fast path instead:
+sudo STF_CORE_IP=10.10.10.3 bash install-provider.sh
 ```
 
 `install-provider.sh` detects this host's `10.8.0.x` address (or takes
@@ -75,10 +78,10 @@ The provider claims `min-port..max-port` (default `7600-7700`) **on its own
 host**, and those ports are what the browser connects to for video. They must
 be free *on that host*.
 
-`7600-7700` deliberately avoids `7400-7500`, which the Windows core's own
-provider uses, and avoids `7680`, which Windows Delivery Optimization
-(`svchost`) reserves. On Linux this only matters for collisions with the other
-provider — pick any free block if you have more than one phone host.
+`7600-7700` deliberately avoids `7400-7500`, which the Windows provider uses,
+and avoids `7680`, which Windows Delivery Optimization (`svchost`) reserves. On
+Linux this only matters for collisions with the other provider — pick any free
+block if you have more than one phone host.
 
 Do **not** reuse a range across hosts on the same machine, and if a provider
 sits in a range something else already holds, it fails with:
@@ -111,7 +114,7 @@ Nothing is exposed to the LAN or the internet.
 sudo docker inspect stf-provider-peer --format '{{.State.Status}} {{.State.Health.Status}}'
 sudo docker logs stf-provider-peer | grep -E 'Fully operational|Providing all'
 
-# from the core host
+# from the core host (on Proxmox: `pct exec 110 -- docker logs stf-core`)
 docker logs stf-core | grep "is present"          # no 'Reaping' lines
 ```
 
