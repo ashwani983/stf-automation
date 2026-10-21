@@ -33,6 +33,14 @@ services:
       - --max-port=${PROVIDER_MAX_PORT:-7500}
       - --adb-host=${ADB_HOST:-host.docker.internal}
       - --adb-port=${ADB_PORT:-5037}
+      # Allow devices that are attached over the network (`adb connect HOST:PORT`)
+      # rather than by USB. STF filters those out by default and logs:
+      #   Filtered out remote device "10.8.0.2:34571", use --allow-remote to override
+      # Required for phones shared by another host on the mesh. Note this trusts
+      # whatever adb reports: only enable it where the adb server is one you
+      # control and that is firewalled to the mesh (see ../peers/restrict-adb.sh
+      # and allow-container-adb.ps1).
+      - --allow-remote
       - --group-timeout=${GROUP_TIMEOUT:-900}
     ports:
       # Device streaming ports must be reachable by the browser.

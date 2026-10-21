@@ -26,12 +26,26 @@ if (Test-Path $adb) {
         Write-Host '==> adb server already listening on 0.0.0.0:5037'
     }
     & $adb devices -l
+
+    # Re-attach devices shared by another host over the network. They are not
+    # persisted by adb, so a reboot loses them unless we reconnect here.
+    # Comma-separated in .env.provider, e.g. NETWORK_DEVICES=10.8.0.2:34571
+    $netDevs = (Select-String -Path .env.provider -Pattern '^NETWORK_DEVICES=(.*)$' -ErrorAction SilentlyContinue).Matches.Groups[1].Value
+    if ($netDevs) {
+        foreach ($addr in ($netDevs -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+            Write-Host "==> adb connect $addr"
+            & $adb connect $addr | ForEach-Object { Write-Host "    $_" }
+        }
+        & $adb devices -l
+    }
 } else {
     Write-Warning "adb not found at $adb -- set ADB_HOST in .env.provider to reach adb somewhere else"
 }
 
 Write-Host '==> docker compose up -d (provider only, core is on Proxmox)'
-docker compose -f provider-compose.yml --env-file .env.provider up -d
+# --force-recreate so a changed .env.provider (ADB_HOST, NETWORK_DEVICES) is
+# actually picked up. Without it a re-run silently keeps the old settings.
+docker compose -f provider-compose.yml --env-file .env.provider up -d --force-recreate
 
 Write-Host '==> status'
 docker compose -f provider-compose.yml --env-file .env.provider ps

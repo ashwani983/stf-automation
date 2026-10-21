@@ -55,6 +55,59 @@ address, with `--allow-remote`). Upstream calls that "highly unrecommended":
 minicap video is *piped through adb*, so every frame would cross the WAN on a
 single TCP socket, compounding the latency.
 
+## Devices attached over the network (`adb connect`)
+
+A phone does not have to be plugged into this PC by USB. If it is shared by
+another host on the mesh, it appears here as a network device, e.g.
+`10.8.0.2:34571`.
+
+STF's provider **ignores those by default** and logs:
+
+```
+Filtered out remote device "10.8.0.2:34571", use --allow-remote to override
+```
+
+That is an intentional safeguard, not a bug. `provider-compose.yml` therefore
+passes `--allow-remote`, so mesh-shared phones are accepted. Only do this where
+the adb server is one you control and is firewalled to the mesh (see
+`../peers/restrict-adb.sh` and `allow-container-adb.ps1`).
+
+To attach one and have it show up immediately:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\add-network-device.ps1 -Address 10.8.0.2:34571
+```
+
+`start.ps1` re-establishes devices listed in `NETWORK_DEVICES` (in
+`.env.provider`) on each start, so a reboot does not lose them.
+
+## The provider must use a reachable adb address
+
+`provider-compose.yml` sets `--adb-host=${ADB_HOST}`. Two traps on Docker
+Desktop for Windows:
+
+* **`host.docker.internal` resolves to IPv6** inside the container
+  (`fdc4:f303:9324::254`), which is the Docker VM — *not* this PC's adb. The
+  container then talks to an empty adb server and silently sees zero devices.
+  Use the host's concrete address (`ADB_HOST=10.8.0.4`) instead.
+* **adb listens on `127.0.0.1` by default**, so nothing outside this PC can
+  reach it. Run it as `adb -a nodaemon server start` to bind `0.0.0.0:5037`
+  (`start.ps1` does this).
+* Even then, the stock `adb.exe` firewall rules are **Public-profile only**,
+  while Docker/WSL traffic arrives on the `vEthernet` interfaces. The
+  connection is accepted and then closed immediately — adb answers nothing,
+  even to `host:version`. Fix:
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\allow-container-adb.ps1
+  ```
+
+  which allows inbound TCP 5037 from the container networks only.
+
+Symptom of getting this wrong: the provider reports `Providing all 1 device(s)`
+no matter how many phones are attached, and never logs `Found device` for the
+missing ones.
+
 ## Files
 
 | File | Purpose |
@@ -64,6 +117,9 @@ single TCP socket, compounding the latency.
 | `start.ps1` | ensure adb is on `0.0.0.0`, then bring the provider up |
 | `stop.ps1` | stop the provider |
 | `firewall.ps1` | open the stream ports on the WireGuard interface (self-elevates) |
+| `allow-container-adb.ps1` | let the provider container reach the host adb (self-elevates) |
+| `route-to-core.ps1` | persistent route to the core's `10.10.10.0/24` cable subnet (self-elevates) |
+| `add-network-device.ps1` | re-attach an `adb connect` phone and restart the provider |
 | `adb-service.ps1` | scheduled task so adb listens on all interfaces after reboot |
 | `docker-compose.yml` | **legacy**: the old core-on-Windows stack, kept for rollback |
 
