@@ -12,7 +12,8 @@ the Proxmox box, the **phones** wherever they happen to be plugged in.
                     |  LXC stf-core + rethinkdb                   |
                     |  :7100 panel   :7110 ws                     |
                     |  :7114/:7116 provider ZMQ                   |
-                    |                                             |
+                    |  See core/README.md              |
+                    |  panel: http://10.8.0.5:7100  <- use this    |
                     |  10.10.10.3  <- direct cable, ~0.5 ms       |
                     |  10.8.0.5    <- WireGuard mesh, ~241 ms     |
                     +------+-----------------+--------------------+

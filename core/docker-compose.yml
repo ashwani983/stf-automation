@@ -18,12 +18,19 @@
 # Hosts 0.3 and the Windows PC reach this core over the WireGuard mesh
 # (10.8.0.0/24) instead; Proxmox forwards and NATs for 10.10.10.0/24.
 #
-# `--public-ip` is the address the BROWSER uses for the per-device streaming
-# websockets *served by the providers*, not by the core, so it is only used for
-# building URLs on the core's own pages. Set it to the address most clients use.
+# `--public-ip` is what the BROWSER is told to use. It is NOT a bind address:
+# the core puts it in its HTTP redirects (http://<ip>:7100/auth/...) and in the
+# websocket URL the panel opens (ws://<ip>:7110). So it must be an address that
+# EVERY host opening the panel can reach - see ../core/.env.example.
 #
-# Reach the panel at http://10.10.10.3:7100 (from the cable side / 0.6)
-#                   or   http://10.0.0.5:7100  (from the mesh, via proxmox)
+# Well-known failure: setting STF_IP to the container's cable address
+# (10.10.10.3) works from the cable side but breaks the panel everywhere else.
+# The page loads, then the socket dies with "WebSocket is closed before the
+# connection is established", because a mesh peer sends 10.10.10.3 to the hub,
+# which has no route for it.
+#
+# Reach the panel at http://10.8.0.5:7100  (from the mesh, DNAT-ed by Proxmox)
+#                   or   http://10.10.10.3:7100 (from the cable side / 0.6)
 services:
   rethinkdb:
     image: rethinkdb:2.4.2

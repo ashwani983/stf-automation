@@ -21,7 +21,15 @@ An **LXC container on the Proxmox host**, not a VM: `stf-core`, CTID **110**.
 | Container | privileged, `features: nesting=1,keyctl=1` (same shape as the `photoprism` CT) |
 | Size | 4 cores, 4 GB RAM, 24 GB on `local-lvm`, `onboot=1` |
 | Address | `10.10.10.3/24` on `vmbr0` — the **direct cable** to host `0.6` |
-| Panel | <http://10.10.10.3:7100> |
+| Panel | <http://10.8.0.5:7100> (from the mesh, DNAT-ed by Proxmox) · <http://10.10.10.3:7100> (from the cable side) |
+
+> `STF_IP` is what the **browser** is told to use, not a bind address: the core
+> puts it in its HTTP redirects and in the panel's websocket URL. It must be
+> reachable from *every* host that opens the panel, so it is set to Proxmox's
+> mesh address `10.8.0.5`. Setting it to the cable address `10.10.10.3` loads
+> the page from the cable side but breaks every mesh host — the socket dies
+> with *"WebSocket is closed before the connection is established"*. Full story
+> in `.env.example`.
 
 Why an LXC on the PVE host rather than Docker on the PVE host itself: the box is
 a hypervisor and stays that way (no Docker installed on it, deliberately), while
